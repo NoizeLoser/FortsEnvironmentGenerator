@@ -21,9 +21,6 @@ try:
 except Exception:
     ctk.set_default_color_theme("blue")
 
-ctk.set_appearance_mode("Dark")
-
-
 class LayerRow(ctk.CTkFrame):
     def __init__(self, master, index, remove_callback, default_zoom="0", **kwargs):
         super().__init__(master, fg_color="transparent", **kwargs)
@@ -75,6 +72,8 @@ class LayerRow(ctk.CTkFrame):
             "zoom": zoom_val,
             "scroll_x": float(self.ent_scroll_x.get() or 0),
             "scroll_y": float(self.ent_scroll_y.get() or 0),
+            "tex_scroll_x": 0.0,
+            "tex_scroll_y": 0.0,
             "foreground": self.switch_fore.get() == 1
         }
 
@@ -104,16 +103,91 @@ class FortsApp(ctk.CTk):
 
         self.init_ui()
 
-        self.add_layer_with_val("0.0", False)
-        self.add_layer_with_val("0.03", False)
-        self.add_layer_with_val("0.15", True)
-
         try:
             icon_path = resource_path("FortsEnvironmentGeneratorIcon.ico")
             if os.path.exists(icon_path):
                 self.wm_iconbitmap(icon_path)
         except Exception:
             pass
+
+    def browse_folder(self):
+        folder = filedialog.askdirectory()
+        if folder:
+            self.output_dir.set(folder)
+
+    def toggle_override(self):
+        state = "normal" if self.is_override.get() else "disabled"
+        self.ent_override.configure(state=state)
+
+    def select_audio(self, key):
+        file_path = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.ogg")])
+        if file_path:
+            self.audio_paths[key] = file_path
+            self.audio_labels[key].configure(text=os.path.basename(file_path), text_color="#2ecc71")
+
+    def select_surf_texture(self, key):
+        file_path = filedialog.askopenfilename(filetypes=[("Texture Files", "*.tga *.dds *.png")])
+        if file_path:
+            self.surf_paths[key] = file_path
+            self.surf_labels[key].configure(text=os.path.basename(file_path), text_color="#2ecc71")
+
+    def add_layer_with_val(self, zoom, is_fore):
+        parent = self.scroll_canvas if hasattr(self, 'scroll_canvas') else self
+        row = LayerRow(parent, index=len(self.layers) + 1, remove_callback=self.remove_layer, default_zoom=zoom)
+        if is_fore:
+            row.switch_fore.select()
+        self.layers.append(row)
+        self.update_layer_indices()
+
+    def remove_layer(self, row_instance):
+        row_instance.pack_forget()
+        row_instance.destroy()
+        self.layers.remove(row_instance)
+        self.update_layer_indices()
+
+    def update_layer_indices(self):
+        for idx, row in enumerate(self.layers, 1):
+            row.lbl_num.configure(text=f"Слой {idx}")
+            row.index = idx
+
+    def get_backend_instance(self):
+        return FortsModBackend(
+            output_dir=self.output_dir.get(),
+            mod_name=self.mod_name.get(),
+            theme_id=self.theme_id.get(),
+            display_en=self.display_en.get(),
+            display_ru=self.display_ru.get(),
+            is_override=self.is_override.get(),
+            override_target=self.override_target.get()
+        )
+
+    def render_and_open_gif(self):
+        if not self.output_dir.get():
+            messagebox.showerror("Ошибка", "Укажите путь сохранения вверху окна!")
+            return
+        try:
+            compiled_layers = [row.get_data() for row in self.layers]
+            backend = self.get_backend_instance()
+            gif_res_path = backend.generate_preview_gif(compiled_layers)
+            os.startfile(gif_res_path)
+        except Exception as e:
+            messagebox.showerror("Ошибка рендеринга", str(e))
+
+    def build_mod(self):
+        if not self.output_dir.get():
+            messagebox.showerror("Ошибка", "Укажите папку генерации мода!")
+            return
+        try:
+            compiled_layers = [row.get_data() for row in self.layers]
+            backend = self.get_backend_instance()
+
+            generated_path = backend.generate(compiled_layers, self.audio_paths)
+
+            backend.generate_surfaces(self.surf_paths)
+
+            messagebox.showinfo("Успех", f"Мод со всеми ресурсами успешно собран!\n\nПуть: {generated_path}")
+        except Exception as e:
+            messagebox.showerror("Ошибка сборки", str(e))
 
     def init_ui(self):
         meta_frame = ctk.CTkFrame(self)
@@ -134,6 +208,18 @@ class FortsApp(ctk.CTk):
 
         ctk.CTkLabel(meta_frame, text="ID темы:").grid(row=3, column=0, sticky="w", padx=10)
         ctk.CTkEntry(meta_frame, textvariable=self.theme_id, width=200).grid(row=3, column=1, sticky="w", pady=2)
+
+        ctk.CTkLabel(meta_frame, text="Название EN / RU:").grid(row=4, column=0, sticky="w", padx=10)
+        lang_box = ctk.CTkFrame(meta_frame, fg_color="transparent")
+        lang_box.grid(row=4, column=1, columnspan=2, sticky="w")
+        ctk.CTkEntry(lang_box, textvariable=self.display_en, width=120).pack(side="left", padx=(0, 5))
+        ctk.CTkEntry(lang_box, textvariable=self.display_ru, width=120).pack(side="left")
+
+        self.chk_override = ctk.CTkCheckBox(meta_frame, text="Переопределить ванильную тему:",
+                                            variable=self.is_override, command=self.toggle_override)
+        self.chk_override.grid(row=5, column=0, padx=10, pady=5, sticky="w")
+        self.ent_override = ctk.CTkEntry(meta_frame, textvariable=self.override_target, width=150, state="disabled")
+        self.ent_override.grid(row=5, column=1, sticky="w", padx=5, pady=5)
 
         self.tabview = ctk.CTkTabview(self)
         self.tabview.pack(padx=20, pady=5, fill="both", expand=True)
@@ -162,13 +248,17 @@ class FortsApp(ctk.CTk):
         self.scroll_canvas = ctk.CTkScrollableFrame(tab_visual)
         self.scroll_canvas.pack(fill="both", expand=True, padx=5)
 
+        self.add_layer_with_val("0.0", False)
+        self.add_layer_with_val("0.03", False)
+        self.add_layer_with_val("0.15", True)
+
         audio_container = ctk.CTkScrollableFrame(tab_audio)
         audio_container.pack(fill="both", expand=True, padx=5, pady=5)
         sound_types = [
             ("ambient", "Фоновый эмбиент карты (ветер, океан):", "ambient.mp3"),
             ("idle", "Музыка: Спокойное состояние (строительство):", "music_calm.mp3"),
             ("intense", "Музыка: Активная фаза (бой):", "music_battle.mp3"),
-            ("win", "Музыка: Экран побены (Win):", "music_win.mp3"),
+            ("win", "Музыка: Экран победы (Win):", "music_win.mp3"),
             ("lose", "Музыка: Экран поражения (Lose):", "music_lose.mp3")
         ]
         for row_idx, (key, title, default) in enumerate(sound_types):
@@ -207,89 +297,14 @@ class FortsApp(ctk.CTk):
         preview_box = ctk.CTkFrame(tab_preview, fg_color="transparent")
         preview_box.pack(expand=True)
         ctk.CTkLabel(preview_box, text="Генератор демо-ролика параллакса", font=("Arial", 16, "bold")).pack(pady=10)
-
         btn_render_gif = ctk.CTkButton(preview_box, text="🎬 СГЕНЕРИРОВАТЬ И ПОКАЗАТЬ РОЛИК", font=("Arial", 14, "bold"),
                                        height=45, command=self.render_and_open_gif)
         btn_render_gif.pack(pady=20)
+
         btn_build = ctk.CTkButton(self, text="СГЕНЕРИРОВАТЬ СТРУКТУРУ МОДА", font=("Arial", 15, "bold"), height=45,
                                   command=self.build_mod)
         btn_build.pack(padx=20, pady=10, fill="x")
 
-    def browse_folder(self):
-        folder = filedialog.askdirectory()
-        if folder: self.output_dir.set(folder)
-
-    def select_audio(self, key):
-        file_path = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.ogg")])
-
-        if file_path:
-            self.audio_paths[key] = file_path
-        self.audio_labels[key].configure(text=os.path.basename(file_path), text_color="#2ecc71")
-
-    def select_surf_texture(self, key):
-        file_path = filedialog.askopenfilename(filetypes=[("Texture Files", "*.tga *.dds *.png")])
-
-        if file_path:
-            self.surf_paths[key] = file_path
-        self.surf_labels[key].configure(text=os.path.basename(file_path), text_color="#2ecc71")
-
-    def add_layer_with_val(self, zoom, is_fore):
-        row = LayerRow(self.scroll_canvas, index=len(self.layers) + 1, remove_callback=self.remove_layer, default_zoom=zoom)
-        if is_fore: row.switch_fore.select()
-        self.layers.append(row)
-        self.update_layer_indices()
-
-    def remove_layer(self, row_instance):
-        row_instance.pack_forget()
-
-        row_instance.destroy()
-        self.layers.remove(row_instance)
-        self.update_layer_indices()
-
-    def update_layer_indices(self):
-        for idx, row in enumerate(self.layers, 1):
-            row.lbl_num.configure(text=f"Слой {idx}")
-            row.index = idx
-
-    def get_backend_instance(self):
-        return FortsModBackend(
-            output_dir=self.output_dir.get(),
-            mod_name=self.mod_name.get(),
-            theme_id=self.theme_id.get(),
-            display_en=self.display_en.get(),
-            display_ru=self.display_ru.get(),
-            is_override=self.is_override.get(),
-            override_target=self.override_target.get()
-        )
-
-    def render_and_open_gif(self):
-        if not self.output_dir.get():
-            messagebox.showerror("Ошибка", "Укажите путь сохранения вверху окна!")
-            return
-        try:
-            compiled_layers = [row.get_data() for row in self.layers]
-            backend = self.get_backend_instance()
-            gif_res_path = backend.generate_preview_gif(compiled_layers)
-            os.startfile(gif_res_path)
-        except Exception as e:
-            messagebox.showerror("Ошибка рендеринга", str(e))
-
-
-    def build_mod(self):
-        if not self.output_dir.get():
-            messagebox.showerror("Ошибка", "Укажите папку генерации мода!")
-            return
-        try:
-            compiled_layers = [row.get_data() for row in self.layers]
-            backend = self.get_backend_instance()
-            generated_path = backend.generate(compiled_layers, self.audio_paths)
-            backend.generate_surfaces(self.surf_paths)
-            messagebox.showinfo("Успех", f"Мод со всеми ресурсами успешно собран!\n\nПуть: {generated_path}")
-        except Exception as e:
-            messagebox.showerror("Ошибка сборки", str(e))
-
 if __name__ == "__main__":
     app = FortsApp()
     app.mainloop()
-
-
