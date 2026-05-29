@@ -1,6 +1,8 @@
+import json
 import os
 import shutil
 from PIL import Image, ImageDraw
+
 
 class FortsModBackend:
     def __init__(self, output_dir, mod_name, theme_id, display_en, display_ru, is_override, override_target):
@@ -12,17 +14,39 @@ class FortsModBackend:
         self.is_override = is_override
         self.override_target = override_target
 
-    def generate(self, layers_data, audio_data, surfaces_data):
+    def generate(self, layers_data, audio_data, surfaces_data=None):
+        """Основная сборка папок, ресурсов мода и экспорт файла проекта JSON"""
         mod_root = os.path.join(self.output_dir, self.mod_name)
         env_root = os.path.join(mod_root, "environment", self.theme_id)
         bg_root = os.path.join(env_root, "background")
         audio_root = os.path.join(env_root, "audio")
         music_root = os.path.join(mod_root, "music")
         scripts_root = os.path.join(mod_root, "scripts")
-        surf_root = os.path.join(env_root, "surfaces")
 
-        for folder in [mod_root, env_root, bg_root, audio_root, music_root, scripts_root, surf_root]:
+        for folder in [mod_root, env_root, bg_root, audio_root, music_root, scripts_root]:
             os.makedirs(folder, exist_ok=True)
+
+        app_name = "Forts Environment Mod Generator"
+        project_filename = f"created in {app_name}.json"
+        project_file_path = os.path.join(mod_root, project_filename)
+
+        project_data = {
+            "meta": {
+                "generator": app_name,
+                "mod_name": self.mod_name,
+                "theme_id": self.theme_id,
+                "display_en": self.display_en,
+                "display_ru": self.display_ru,
+                "is_override": self.is_override,
+                "override_target": self.override_target
+            },
+            "layers": layers_data,
+            "audio": audio_data,
+            "surfaces": surfaces_data if surfaces_data else {"flat_path": "", "wall_path": "", "ceil_path": ""}
+        }
+
+        with open(project_file_path, "w", encoding="utf-8") as json_file:
+            json.dump(project_data, json_file, indent=4, ensure_ascii=False)
 
         with open(os.path.join(mod_root, "mod.lua"), "w", encoding="utf-8") as f:
             if self.is_override:
@@ -31,7 +55,8 @@ class FortsModBackend:
                 f.write("-- Deliberately empty.\n")
 
         with open(os.path.join(mod_root, "displayname.lua"), "w", encoding="utf-8") as f:
-            f.write(f"DisplayName =\n{{\n    ['English'] = L\"{self.display_en}\",\n    ['Russian'] = L\"{self.display_ru}\",\n}}\n")
+            f.write(
+                f"DisplayName =\n{{\n    ['English'] = L\"{self.display_en}\",\n    ['Russian'] = L\"{self.display_ru}\",\n}}\n")
 
         with open(os.path.join(mod_root, "publishedfileid.lua"), "w", encoding="utf-8") as f:
             f.write("0\n")
@@ -47,34 +72,17 @@ class FortsModBackend:
             f.write("BackgroundColour = { 0, 0, 0, 255 }\n\nLayers =\n{\n")
             for idx, layer in enumerate(layers_data, 1):
                 tex_file = copy_resource(layer['texture_path'], bg_root, f"layer_{idx}.tga")
+
                 f.write(f"    -- Слой {idx}\n    {{\n")
                 f.write(f"        ZoomFactor = {layer['zoom']},\n")
                 f.write(f"        ScrollRateX = {layer['scroll_x']},\n")
                 f.write(f"        ScrollRateY = {layer['scroll_y']},\n")
-                f.write(f"        TextureScrollRateX = {layer['tex_scroll_x']},\n")
-                f.write(f"        TextureScrollRateY = {layer['tex_scroll_y']},\n")
+                f.write(f"        TextureScrollRateX = 0,\n        TextureScrollRateY = 0,\n")
                 f.write(f"        Foreground = {str(layer['foreground']).lower()},\n")
                 f.write(f"        GridTileOffsetX = -0.5,\n        GridTileOffsetY = -0.5,\n")
-                f.write(f"        Tiles = {{ {{ GridX = 0, GridY = 0, ClampT = true, TextureFileName = bgpath .. \"{tex_file}\" }} }},\n")
+                f.write(
+                    f"        Tiles = {{ {{ GridX = 0, GridY = 0, ClampT = true, TextureFileName = bgpath .. \"{tex_file}\" }} }},\n")
                 f.write("    },\n")
-            f.write("}\n")
-
-        flat_tex = copy_resource(surfaces_data['flat_path'], surf_root, "grass.tga")
-        wall_tex = copy_resource(surfaces_data['wall_path'], surf_root, "rock.tga")
-        ceil_tex = copy_resource(surfaces_data['ceil_path'], surf_root, "cave.tga")
-
-        with open(os.path.join(surf_root, "surfaces.lua"), "w", encoding="utf-8") as f:
-            f.write("Surfaces =\n{\n")
-            f.write(f"    {{\n        Name = \"{self.theme_id}_flat\",\n        Interval = {{ -45, 45 }},\n")
-            f.write(f"        Texture = path .. \"/environment/{self.theme_id}/surfaces/{flat_tex}\",\n        WaveAmplitude = 0,\n    }},\n")
-            f.write(f"    {{\n        Name = \"{self.theme_id}_wall_left\",\n        Interval = {{ 45, 135 }},\n")
-            f.write(f"        Texture = path .. \"/environment/{self.theme_id}/surfaces/{wall_tex}\",\n        WaveAmplitude = 0,\n    }},\n")
-            f.write(f"    {{\n        Name = \"{self.theme_id}_wall_right\",\n        Interval = {{ -135, -45 }},\n")
-            f.write(f"        Texture = path .. \"/environment/{self.theme_id}/surfaces/{wall_tex}\",\n        WaveAmplitude = 0,\n    }},\n")
-            f.write(f"    {{\n        Name = \"{self.theme_id}_ceiling_left\",\n        Interval = {{ 135, 180 }},\n")
-            f.write(f"        Texture = path .. \"/environment/{self.theme_id}/surfaces/{ceil_tex}\",\n        WaveAmplitude = 0,\n    }},\n")
-            f.write(f"    {{\n        Name = \"{self.theme_id}_ceiling_right\",\n        Interval = {{ -180, -135 }},\n")
-            f.write(f"        Texture = path .. \"/environment/{self.theme_id}/surfaces/{ceil_tex}\",\n        WaveAmplitude = 0,\n    }},\n")
             f.write("}\n")
 
         ambient_file = copy_resource(audio_data['ambient'], audio_root, f"enviro_{self.theme_id}_wind_01.mp3")
@@ -84,10 +92,12 @@ class FortsModBackend:
         lose_file = copy_resource(audio_data['lose'], music_root, f"{self.theme_id}_defeat.mp3")
 
         with open(os.path.join(env_root, "ambient.lua"), "w", encoding="utf-8") as f:
-            f.write(f"LifeSpan = 5\nEffects =\n{{\n    {{\n        Type = \"sound\",\n        TimeToTrigger = 0,\n        FadeInPeriod = 0.5,\n")
+            f.write(
+                f"LifeSpan = 5\nEffects =\n{{\n    {{\n        Type = \"sound\",\n        TimeToTrigger = 0,\n        FadeInPeriod = 0.5,\n")
             f.write(f"        LocalPosition = {{ x = 0, y = 0, z = 0 }},\n")
             f.write(f"        Sound = path .. \"/environment/{self.theme_id}/audio/{ambient_file}\",\n")
-            f.write("        Volume = 0.5,\n        Falloff = false,\n        Priority = 128,\n        Repeat = true,\n        RandomiseStart = true,\n    },\n}\n")
+            f.write(
+                "        Volume = 0.5,\n        Falloff = false,\n        Priority = 128,\n        Repeat = true,\n        RandomiseStart = true,\n    },\n}\n")
 
         with open(os.path.join(scripts_root, "music.lua"), "w", encoding="utf-8") as f:
             f.write(f'MusicState.Idle.Series = path .. "/music/{idle_file}"\n')
@@ -97,20 +107,91 @@ class FortsModBackend:
 
         open(os.path.join(mod_root, "preview.jpg"), "w").close()
         open(os.path.join(env_root, "preview.jpg"), "w").close()
+
         return mod_root
 
+    def generate_surfaces(self, surfaces_data):
+        """Генерация поверхностей земли (surfaces.lua)"""
+        mod_root = os.path.join(self.output_dir, self.mod_name)
+        env_root = os.path.join(mod_root, "environment", self.theme_id)
+        surf_root = os.path.join(env_root, "surfaces")
+
+        os.makedirs(surf_root, exist_ok=True)
+
+        def copy_surf_texture(src_path, default_name):
+            if src_path and os.path.exists(src_path):
+                filename = os.path.basename(src_path)
+                shutil.copy(src_path, os.path.join(surf_root, filename))
+                return filename
+            return default_name
+
+        flat_tex = copy_surf_texture(surfaces_data['flat_path'], "grass.tga")
+        wall_tex = copy_surf_texture(surfaces_data['wall_path'], "rock.tga")
+        ceil_tex = copy_surf_texture(surfaces_data['ceil_path'], "cave.tga")
+
+        with open(os.path.join(surf_root, "surfaces.lua"), "w", encoding="utf-8") as f:
+            f.write("-- Automatically generated by Forts Environment Mod Generator\n")
+            f.write("Surfaces =\n{\n")
+
+            # Плоская земля
+            f.write("    {\n")
+            f.write(f'        Name = "{self.theme_id}_flat",\n')
+            f.write("        Interval = { -45, 45 },\n")
+            f.write(f'        Texture = path .. "/environment/{self.theme_id}/surfaces/{flat_tex}",\n')
+            f.write("        WaveAmplitude = 0,\n")
+            f.write("    },\n")
+
+            # Склоны/Стены
+            f.write("    {\n")
+            f.write(f'        Name = "{self.theme_id}_wall_left",\n')
+            f.write("        Interval = { 45, 135 },\n")
+            f.write(f'        Texture = path .. "/environment/{self.theme_id}/surfaces/{wall_tex}",\n')
+            f.write("        WaveAmplitude = 0,\n")
+            f.write("    },\n")
+            f.write("    {\n")
+            f.write(f'        Name = "{self.theme_id}_wall_right",\n')
+            f.write("        Interval = { -135, -45 },\n")
+            f.write(f'        Texture = path .. "/environment/{self.theme_id}/surfaces/{wall_tex}",\n')
+            f.write("        WaveAmplitude = 0,\n")
+            f.write("    },\n")
+
+            # Потолки пещер
+            f.write("    {\n")
+            f.write(f'        Name = "{self.theme_id}_ceiling_left",\n')
+            f.write("        Interval = { 135, 180 },\n")
+            f.write(f'        Texture = path .. "/environment/{self.theme_id}/surfaces/{ceil_tex}",\n')
+            f.write("        WaveAmplitude = 0,\n")
+            f.write("    },\n")
+            f.write("    {\n")
+            f.write(f'        Name = "{self.theme_id}_ceiling_right",\n')
+            f.write("        Interval = { -180, -135 },\n")
+            f.write(f'        Texture = path .. "/environment/{self.theme_id}/surfaces/{ceil_tex}",\n')
+            f.write("        WaveAmplitude = 0,\n")
+            f.write("    },\n")
+
+            f.write("}\n")
+
     def generate_preview_gif(self, layers_data):
+        """Рендерит анимацию параллакса в GIF-файл (без ошибок списков)"""
         mod_root = os.path.join(self.output_dir, self.mod_name)
         os.makedirs(mod_root, exist_ok=True)
         gif_path = os.path.join(mod_root, "parallax_preview.gif")
+
         W, H = 800, 400
         center_y = H / 2
         frames = []
-        layer_styles = [("#2c3e50", "#34495e"), ("#16a085", "#1abc9c"), ("#2980b9", "#3498db"), ("#d35400", "#e67e22")]
+
+        layer_styles = [
+            ("#2c3e50", "#34495e"),
+            ("#16a085", "#1abc9c"),
+            ("#2980b9", "#3498db"),
+            ("#d35400", "#e67e22")
+        ]
 
         for step in range(30):
             import math
             cam_x = math.sin(step * (2 * math.pi / 30)) * 150
+
             img = Image.new("RGB", (W, H), "#1a1a1a")
             draw = ImageDraw.Draw(img)
 
@@ -119,32 +200,43 @@ class FortsModBackend:
 
             for idx, layer in enumerate(back_layers):
                 zoom = layer['zoom']
-                offset_x = - (cam_x * zoom * 5) + (step * layer['tex_scroll_x'] * 2)
+                offset_x = - (cam_x * zoom * 5)
                 style_idx = idx % len(layer_styles)
                 color, decor_color = layer_styles[style_idx]
-                display_name = os.path.basename(layer['texture_path']) if layer['texture_path'] else f"layer_{idx+1}.tga"
+                display_name = os.path.basename(layer['texture_path']) if layer[
+                    'texture_path'] else f"layer_{idx + 1}.tga"
 
                 for tile_i in range(-2, 3):
                     x_start = (W / 2) + offset_x + (tile_i * 400)
-                    draw.rectangle([x_start - 200, center_y - 20 + (idx*15), x_start + 200, H], fill=color)
-                    draw.polygon([x_start - 100, center_y - 20 + (idx*15), x_start, center_y - 80 + (idx*15), x_start + 100, center_y - 20 + (idx*15)], fill=decor_color)
-                    draw.text((x_start - 30, center_y + 40 + (idx*20)), display_name, fill="#ecf0f1")
+                    draw.rectangle([x_start - 200, center_y - 20 + (idx * 15), x_start + 200, H], fill=color)
+                    draw.polygon([
+                        x_start - 100, center_y - 20 + (idx * 15),
+                        x_start, center_y - 80 + (idx * 15),
+                        x_start + 100, center_y - 20 + (idx * 15)
+                    ], fill=decor_color)
+                    draw.text((x_start - 30, center_y + 40 + (idx * 20)), display_name, fill="#ecf0f1")
 
             world_offset_x = - (cam_x * 2.5)
             w_center_x = (W / 2) + world_offset_x
-            draw.rectangle([w_center_x - 150, center_y + 30, w_center_x + 150, center_y + 50], fill="#27ae60", outline="#2ecc71", width=2)
+            draw.rectangle([w_center_x - 150, center_y + 30, w_center_x + 150, center_y + 50], fill="#27ae60",
+                           outline="#2ecc71", width=2)
             draw.rectangle([w_center_x - 120, center_y - 20, w_center_x - 80, center_y + 30], fill="#7f8c8d")
             draw.rectangle([w_center_x + 80, center_y - 20, w_center_x + 120, center_y + 30], fill="#7f8c8d")
+            draw.text((w_center_x - 110, center_y), "FORT A", fill="white")
+            draw.text((w_center_x + 90, center_y), "FORT B", fill="white")
 
             for idx, layer in enumerate(fore_layers):
                 zoom = layer['zoom']
-                offset_x = - (cam_x * zoom * 5) + (step * layer['tex_scroll_x'] * 2)
+                offset_x = - (cam_x * zoom * 5)
                 display_name = os.path.basename(layer['texture_path']) if layer['texture_path'] else "front_layer.tga"
                 for tile_i in range(-2, 3):
                     x_start = (W / 2) + offset_x + (tile_i * 300)
                     draw.ellipse([x_start - 50, center_y - 60, x_start - 40, center_y - 50], fill="#ffffff")
+                    draw.ellipse([x_start + 60, center_y, x_start + 70, center_y + 10], fill="#ffffff")
                     draw.text((x_start, center_y - 80), f"Front: {display_name}", fill="#f1c40f")
 
             frames.append(img)
-        frames.save(gif_path, save_all=True, append_images=frames[1:], duration=50, loop=0)
+        if frames:
+            frames[0].save(gif_path, save_all=True, append_images=frames[1:], duration=50, loop=0)
+
         return gif_path
