@@ -1,13 +1,9 @@
-import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import customtkinter as ctk
 import os
+import sys
 from generator_backend import FortsModBackend
-
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
-
 
 def resource_path(relative_path):
     try:
@@ -56,7 +52,6 @@ class LayerRow(ctk.CTkFrame):
         self.ent_scroll_y.insert(0, "0")
         self.ent_scroll_y.pack(side="left", padx=15)
 
-        # 6. Переключатель Спереди/Бэк (Ширина: 100)
         self.switch_fore = ctk.CTkSwitch(self, text="Включить", width=100)
         self.switch_fore.pack(side="left", padx=15)
 
@@ -65,7 +60,6 @@ class LayerRow(ctk.CTkFrame):
         self.btn_del.pack(side="right", padx=5)
 
     def choose_texture(self):
-        """Проводник для выбора файла текстуры слоя"""
         file_path = filedialog.askopenfilename(filetypes=[("Forts Textures", "*.tga *.dds *.png")])
         if file_path:
             self.texture_path = file_path
@@ -102,6 +96,10 @@ class FortsApp(ctk.CTk):
 
         self.audio_paths = {"ambient": "", "idle": "", "intense": "", "win": "", "lose": ""}
         self.audio_labels = {}
+
+        self.surf_paths = {"flat_path": "", "wall_path": "", "ceil_path": ""}
+        self.surf_labels = {}
+
         self.layers = []
 
         self.init_ui()
@@ -142,12 +140,13 @@ class FortsApp(ctk.CTk):
 
         tab_visual = self.tabview.add("Слои (Параллакс)")
         tab_audio = self.tabview.add("Звуки и Музыка")
+        tab_surfaces = self.tabview.add("⛰️ Поверхности земли")
         tab_preview = self.tabview.add("🎬 Видео-предпросмотр")
 
         ctrl_box = ctk.CTkFrame(tab_visual, fg_color="transparent")
         ctrl_box.pack(fill="x", padx=5, pady=5)
-        ctk.CTkButton(ctrl_box, text="+ Добавить слой", command=lambda: self.add_layer_with_val("0.05", False),
-                      fg_color="#2980b9").pack(side="right")
+        ctk.CTkButton(ctrl_box, text="+ Добавить слой", command=lambda: self.add_layer_with_val("0.05", False)).pack(
+            side="right")
 
         header = ctk.CTkFrame(tab_visual, fg_color="#2c3e50", height=30)
         header.pack(fill="x", pady=2, padx=5)
@@ -157,7 +156,7 @@ class FortsApp(ctk.CTk):
         ctk.CTkLabel(header, text="ZoomFactor", font=("Arial", 11, "bold"), width=80).pack(side="left", padx=15)
         ctk.CTkLabel(header, text="Скорость X", font=("Arial", 11, "bold"), width=80).pack(side="left", padx=15)
         ctk.CTkLabel(header, text="Скорость Y", font=("Arial", 11, "bold"), width=80).pack(side="left", padx=15)
-        ctk.CTkLabel(header, text="Спереди", font=("Arial", 11, "bold"), width=100).pack(side="left", padx=15)
+        ctk.CTkLabel(header, text="Раздел (Фронт)", font=("Arial", 11, "bold"), width=100).pack(side="left", padx=15)
         ctk.CTkLabel(header, text="Удалить", font=("Arial", 11, "bold"), width=40).pack(side="right", padx=5)
 
         self.scroll_canvas = ctk.CTkScrollableFrame(tab_visual)
@@ -169,7 +168,7 @@ class FortsApp(ctk.CTk):
             ("ambient", "Фоновый эмбиент карты (ветер, океан):", "ambient.mp3"),
             ("idle", "Музыка: Спокойное состояние (строительство):", "music_calm.mp3"),
             ("intense", "Музыка: Активная фаза (бой):", "music_battle.mp3"),
-            ("win", "Музыка: Экран победы (Win):", "music_win.mp3"),
+            ("win", "Музыка: Экран побены (Win):", "music_win.mp3"),
             ("lose", "Музыка: Экран поражения (Lose):", "music_lose.mp3")
         ]
         for row_idx, (key, title, default) in enumerate(sound_types):
@@ -186,16 +185,34 @@ class FortsApp(ctk.CTk):
                                                                                                                  sticky="e")
             frame.grid_columnconfigure(0, weight=1)
 
+        surf_container = ctk.CTkScrollableFrame(tab_surfaces)
+        surf_container.pack(fill="both", expand=True, padx=5, pady=5)
+        surf_types = [
+            ("flat_path", "Поверхность земли (0° / Трава, Песок):", "grass.tga"),
+            ("wall_path", "Вертикальные стены и скалы (90° / Камни, Порода):", "rock.tga"),
+            ("ceil_path", "Потолки и своды пещер (180° / Кораллы, Сталактиты):", "cave.tga")
+        ]
+        for row_idx, (key, title, default) in enumerate(surf_types):
+            frame = ctk.CTkFrame(surf_container)
+            frame.pack(fill="x", pady=6, padx=5)
+            ctk.CTkLabel(frame, text=title, font=("Arial", 12, "bold")).grid(row=0, column=0, sticky="w", padx=10,
+                                                                             pady=5)
+            self.surf_labels[key] = ctk.CTkLabel(frame, text=f"Не выбран ({default})", text_color="#7f8c8d")
+            self.surf_labels[key].grid(row=1, column=0, sticky="w", padx=10, pady=2)
+            ctk.CTkButton(frame, text="Выбрать файл", width=140, fg_color="#34495e",
+                          command=lambda k=key: self.select_surf_texture(k)).grid(row=1, column=1, padx=10, pady=5,
+                                                                                  sticky="e")
+            frame.grid_columnconfigure(0, weight=1)
+
         preview_box = ctk.CTkFrame(tab_preview, fg_color="transparent")
         preview_box.pack(expand=True)
         ctk.CTkLabel(preview_box, text="Генератор демо-ролика параллакса", font=("Arial", 16, "bold")).pack(pady=10)
-        btn_render_gif = ctk.CTkButton(preview_box, text="🎬 СГЕНЕРИРОВАТЬ И ПОКАЗАТЬ РОЛИК", font=("Arial", 14, "bold"),
-                                       fg_color="#d35400", hover_color="#e67e22", height=45,
-                                       command=self.render_and_open_gif)
-        btn_render_gif.pack(pady=20)
 
-        btn_build = ctk.CTkButton(self, text="СГЕНЕРИРОВАТЬ СТРУКТУРУ МОДА", font=("Arial", 15, "bold"),
-                                  fg_color="#27ae60", hover_color="#2ecc71", height=45, command=self.build_mod)
+        btn_render_gif = ctk.CTkButton(preview_box, text="🎬 СГЕНЕРИРОВАТЬ И ПОКАЗАТЬ РОЛИК", font=("Arial", 14, "bold"),
+                                       height=45, command=self.render_and_open_gif)
+        btn_render_gif.pack(pady=20)
+        btn_build = ctk.CTkButton(self, text="СГЕНЕРИРОВАТЬ СТРУКТУРУ МОДА", font=("Arial", 15, "bold"), height=45,
+                                  command=self.build_mod)
         btn_build.pack(padx=20, pady=10, fill="x")
 
     def browse_folder(self):
@@ -204,19 +221,27 @@ class FortsApp(ctk.CTk):
 
     def select_audio(self, key):
         file_path = filedialog.askopenfilename(filetypes=[("Audio Files", "*.mp3 *.ogg")])
+
         if file_path:
             self.audio_paths[key] = file_path
-            self.audio_labels[key].configure(text=os.path.basename(file_path), text_color="#2ecc71")
+        self.audio_labels[key].configure(text=os.path.basename(file_path), text_color="#2ecc71")
+
+    def select_surf_texture(self, key):
+        file_path = filedialog.askopenfilename(filetypes=[("Texture Files", "*.tga *.dds *.png")])
+
+        if file_path:
+            self.surf_paths[key] = file_path
+        self.surf_labels[key].configure(text=os.path.basename(file_path), text_color="#2ecc71")
 
     def add_layer_with_val(self, zoom, is_fore):
-        row = LayerRow(self.scroll_canvas, index=len(self.layers) + 1, remove_callback=self.remove_layer,
-                       default_zoom=zoom)
+        row = LayerRow(self.scroll_canvas, index=len(self.layers) + 1, remove_callback=self.remove_layer, default_zoom=zoom)
         if is_fore: row.switch_fore.select()
         self.layers.append(row)
         self.update_layer_indices()
 
     def remove_layer(self, row_instance):
         row_instance.pack_forget()
+
         row_instance.destroy()
         self.layers.remove(row_instance)
         self.update_layer_indices()
@@ -236,6 +261,7 @@ class FortsApp(ctk.CTk):
             is_override=self.is_override.get(),
             override_target=self.override_target.get()
         )
+
     def render_and_open_gif(self):
         if not self.output_dir.get():
             messagebox.showerror("Ошибка", "Укажите путь сохранения вверху окна!")
@@ -248,6 +274,7 @@ class FortsApp(ctk.CTk):
         except Exception as e:
             messagebox.showerror("Ошибка рендеринга", str(e))
 
+
     def build_mod(self):
         if not self.output_dir.get():
             messagebox.showerror("Ошибка", "Укажите папку генерации мода!")
@@ -256,6 +283,7 @@ class FortsApp(ctk.CTk):
             compiled_layers = [row.get_data() for row in self.layers]
             backend = self.get_backend_instance()
             generated_path = backend.generate(compiled_layers, self.audio_paths)
+            backend.generate_surfaces(self.surf_paths)
             messagebox.showinfo("Успех", f"Мод со всеми ресурсами успешно собран!\n\nПуть: {generated_path}")
         except Exception as e:
             messagebox.showerror("Ошибка сборки", str(e))
@@ -263,3 +291,5 @@ class FortsApp(ctk.CTk):
 if __name__ == "__main__":
     app = FortsApp()
     app.mainloop()
+
+
